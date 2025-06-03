@@ -2,7 +2,7 @@ name: Sync Unified Events
 
 on:
   schedule:
-    - cron: '*/15 * * * *'    # every 15 minutes (adjust as desired)
+    - cron: '*/15 * * * *'      # every 15 minutes
   workflow_dispatch:
 
 jobs:
@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
@@ -20,11 +21,26 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # ─── TEMP DEBUG ───
+      # Prints first 10 chars of each Google secret so you can verify
+      # the workflow is receiving exactly what you stored in Settings → Secrets → Actions.
+      # Delete this step after the secrets match.
+      - name: Debug – echo first 10 chars of Google secrets
+        run: |
+          echo "ID:     ${GOOGLE_OAUTH_CLIENT_ID:0:10}"
+          echo "SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:0:10}"
+          echo "TOKEN:  ${GOOGLE_REFRESH_TOKEN:0:10}"
+        env:
+          GOOGLE_OAUTH_CLIENT_ID:     ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN:       ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+      # ─── END DEBUG ───
+
       - name: Run sync script
         run: node sync.js
         env:
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
-          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          NOTION_TOKEN:               ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID:         ${{ secrets.NOTION_DATABASE_ID }}
+          GOOGLE_OAUTH_CLIENT_ID:     ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_REFRESH_TOKEN:       ${{ secrets.GOOGLE_REFRESH_TOKEN }}
