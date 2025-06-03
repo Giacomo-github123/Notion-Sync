@@ -1,0 +1,9 @@
+{
+  "name": "notion-unified-sync",
+  "version": "1.0.0",
+  "dependencies": {
+    "@notionhq/client": "^2.0.0",
+    "googleapis": "^131.0.0",
+    "node-ical": "^0.15.0"
+  }
+}
