@@ -1,11 +1,12 @@
 // sync.js
 import { Client } from "@notionhq/client";
-// import ical from "node-ical";           // ⬅️ iCloud parser (disabled)
 import { google } from "googleapis";
 
+// ─── 1) Initialize Notion client ───────────────────────────────────────────────
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
+// ─── 2) Initialize Google OAuth2 client ────────────────────────────────────────
 const oAuth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_OAUTH_CLIENT_ID,
   process.env.GOOGLE_OAUTH_CLIENT_SECRET
@@ -13,28 +14,37 @@ const oAuth2Client = new google.auth.OAuth2(
 oAuth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
 const calendar = google.calendar({ version: "v3", auth: oAuth2Client });
 
-// const ICLOUD_ICS_URLS = JSON.parse(process.env.ICLOUD_ICS_URLS || "[]"); // ⬅️ disabled
-
+// ─── 3) Fetch existing UIDs from Notion ─────────────────────────────────────────
 async function fetchExistingUIDs() {
   const set = new Set();
-  let cursor;
+  let cursor = undefined;
+
   do {
     const resp = await notion.databases.query({
       database_id: NOTION_DATABASE_ID,
       page_size: 100,
       start_cursor: cursor,
     });
+
     for (const page of resp.results) {
-      const uidProp = page.properties.UID;
-      if (uidProp.rich_text.length) {
-        set.add(uidProp.rich_text[0].plain_text);
+      const props = page.properties;
+      if (
+        props &&
+        Object.prototype.hasOwnProperty.call(props, "UID") &&
+        props.UID.type === "rich_text" &&
+        props.UID.rich_text.length > 0
+      ) {
+        set.add(props.UID.rich_text[0].plain_text);
       }
     }
+
     cursor = resp.has_more ? resp.next_cursor : undefined;
   } while (cursor);
+
   return set;
 }
 
+// ─── 4) Upsert helper into Notion ───────────────────────────────────────────────
 async function upsertEventToNotion(evt) {
   const query = await notion.databases.query({
     database_id: NOTION_DATABASE_ID,
@@ -71,7 +81,7 @@ async function upsertEventToNotion(evt) {
     props.Link = { url: evt.link };
   }
 
-  if (query.results.length) {
+  if (query.results.length > 0) {
     await notion.pages.update({
       page_id: query.results[0].id,
       properties: props,
@@ -84,6 +94,7 @@ async function upsertEventToNotion(evt) {
   }
 }
 
+// ─── 5) Main handler ───────────────────────────────────────────────────────────
 (async () => {
   try {
     const existingUIDs = await fetchExistingUIDs();
@@ -101,6 +112,7 @@ async function upsertEventToNotion(evt) {
         orderBy: "updated",
         maxResults: 100,
       });
+
       for (const ev of data.items || []) {
         const uid = ev.id;
         const startDate = ev.start.dateTime || ev.start.date;
@@ -108,6 +120,7 @@ async function upsertEventToNotion(evt) {
           ev.end?.dateTime ||
           ev.end?.date ||
           new Date(new Date(startDate).getTime() + 3600000).toISOString();
+
         await upsertEventToNotion({
           uid,
           summary: ev.summary,
@@ -119,30 +132,6 @@ async function upsertEventToNotion(evt) {
         existingUIDs.add(uid);
       }
     }
-
-    // B) Sync iCloud/Outlook events via ICS (disabled)
-    /*
-    for (const icsUrl of ICLOUD_ICS_URLS) {
-      const icalData = await ical.fromURL(icsUrl);
-      for (const ev of Object.values(icalData)) {
-        if (ev.type === "VEVENT" && ev.start) {
-          const uid = ev.uid;
-          const startDate = ev.start.toISOString();
-          const endDate = ev.end
-            ? ev.end.toISOString()
-            : new Date(ev.start.getTime() + 3600000).toISOString();
-          await upsertEventToNotion({
-            uid,
-            summary: ev.summary || "(no title)",
-            startDate,
-            endDate,
-            source: "iCloud",
-          });
-          existingUIDs.add(uid);
-        }
-      }
-    }
-    */
 
     console.log("✅ Sync complete");
   } catch (err) {
