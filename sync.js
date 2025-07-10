@@ -24,14 +24,16 @@ async function fetchExistingUIDs() {
       database_id: NOTION_DATABASE_ID,
       page_size: 100,
       start_cursor: cursor,
-      properties: ["UID"],
+      properties: ["UID"]
     });
-    resp.results.forEach(page => {
+
+    for (const page of resp.results) {
       const prop = page.properties.UID;
       if (prop.type === "rich_text" && prop.rich_text.length) {
         uids.add(prop.rich_text[0].plain_text);
       }
-    });
+    }
+
     cursor = resp.has_more ? resp.next_cursor : undefined;
   } while (cursor);
 
@@ -43,7 +45,10 @@ async function upsertEventToNotion(evt) {
   const existing = await notion.databases.query({
     database_id: NOTION_DATABASE_ID,
     page_size: 1,
-    filter: { property: "UID", rich_text: { equals: evt.uid } },
+    filter: {
+      property: "UID",
+      rich_text: { equals: evt.uid }
+    }
   });
 
   const props = {
@@ -54,7 +59,6 @@ async function upsertEventToNotion(evt) {
       date: { start: evt.startDate, end: evt.endDate }
     },
     Calendar: {
-      // ← now rich_text instead of select
       rich_text: [{ text: { content: evt.calendarName } }]
     },
     UID: {
@@ -66,7 +70,7 @@ async function upsertEventToNotion(evt) {
     Notes: {
       rich_text: [{ text: { content: evt.description || "" } }]
     }
-    // Rollup, Domain, Linked Tasks remain untouched
+    // Rollup, Domain, Linked Tasks are left intact in Notion
   };
 
   if (existing.results.length) {
@@ -75,4 +79,61 @@ async function upsertEventToNotion(evt) {
       properties: props
     });
   } else {
-    awai
+    await notion.pages.create({
+      parent: { database_id: NOTION_DATABASE_ID },
+      properties: props
+    });
+  }
+}
+
+// 5) Main sync
+(async () => {
+  try {
+    await fetchExistingUIDs();
+
+    const nowIso = new Date().toISOString();
+    const oneYearAheadIso = new Date(
+      Date.now() + 365 * 24 * 60 * 60 * 1000
+    ).toISOString();
+
+    const listRes = await calendar.calendarList.list();
+    const calendars = listRes.data.items || [];
+
+    for (const cal of calendars) {
+      const calId = cal.id;
+      const calName = cal.summary;
+
+      const { data } = await calendar.events.list({
+        calendarId: calId,
+        timeMin: nowIso,
+        timeMax: oneYearAheadIso,
+        singleEvents: true,
+        orderBy: "startTime",
+        maxResults: 2500
+      });
+
+      for (const ev of data.items || []) {
+        const start = ev.start?.dateTime || ev.start?.date;
+        const end =
+          ev.end?.dateTime ||
+          ev.end?.date ||
+          new Date(new Date(start).getTime() + 60 * 60 * 1000).toISOString();
+
+        await upsertEventToNotion({
+          uid: ev.id,
+          summary: ev.summary,
+          startDate: start,
+          endDate: end,
+          calendarName: calName,
+          location: ev.location,
+          description: ev.description
+        });
+      }
+    }
+
+    console.log("✅ Sync complete");
+  } catch (err) {
+    console.error("❌ Sync error:", err);
+    process.exit(1);
+  }
+})();
